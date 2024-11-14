@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maet98/scrapper/internal"
 	"net/http"
 	"os"
 	"strings"
@@ -82,7 +83,7 @@ func getEpisodeNumber(url string) string {
 	return splits[len(splits)-1]
 }
 
-func scrap(url string) {
+func scrapEpisode(url string) {
 	c := colly.NewCollector()
 	// Instantiate default collector
 	episodeNumber := getEpisodeNumber(url)
@@ -112,9 +113,30 @@ func scrap(url string) {
 	wg.Wait()
 }
 
+func scrapHomePage(url string) []string {
+	var answer []string
+	c := colly.NewCollector()
+
+	// On every a element which has href attribute call callback
+	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
+		url := e.Attr("href")
+		if strings.Contains(url, "chapter") {
+			log.Printf("Found new episode %s -> %s", e.Text, url)
+			answer = append(answer, url)
+		}
+	})
+
+	// Before making a request print "Visiting ..."
+	c.OnRequest(func(r *colly.Request) {
+		fmt.Println("Visiting", r.URL.String())
+	})
+
+	c.Visit(url)
+	return answer
+}
+
 func main() {
-	url := "https://w43.1piecemanga.com/manga/one-piece-chapter-1119/"
-	episodeNumber := getEpisodeNumber(url)
-	err := mergeToPdf(episodeNumber)
-	log.Println("Error", err)
+	// url := "https://w44.1piecemanga.com/manga/one-piece-chapter-1131/"
+	// scrapEpisode(url)
+	internal.Merge()
 }
