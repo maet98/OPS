@@ -9,15 +9,6 @@ import (
 	"github.com/go-pdf/fpdf"
 )
 
-const (
-	DPI                = 96
-	MM_IN_INCH float64 = 25.4
-	A4_HEIGHT          = 297
-	A4_WIDTH           = 210
-	MAX_WIDTH  float64 = 800
-	MAX_HEIGHT float64 = 500
-)
-
 func getSize(imgPath string) image.Config {
 	file, err := os.Open(imgPath)
 	defer file.Close()
@@ -29,10 +20,6 @@ func getSize(imgPath string) image.Config {
 	return img
 }
 
-func pixelToMM(val float64) float64 {
-	return float64(val) * MM_IN_INCH / DPI
-}
-
 func min(x, y float64) float64 {
 	if x < y {
 		return x
@@ -40,27 +27,36 @@ func min(x, y float64) float64 {
 	return y
 }
 
-func getSizeScaled(width, height float64) (float64, float64) {
-	widthScale := MAX_WIDTH / width
-	heightScale := MAX_HEIGHT / height
+func getSizeScaled(width, height float64, pdf *fpdf.Fpdf) (float64, float64) {
+	size := pdf.GetPageSizeStr("A4")
+
+	log.Printf("Width: %f Heigh: %f \n", size.Wd, size.Ht)
+	widthScale := size.Wd / width
+	heightScale := size.Ht / height
 	scale := min(widthScale, heightScale)
-	return pixelToMM(scale * width), pixelToMM(scale * height)
+	return scale * width, scale * height
 }
 
 func Merge() {
-	folder := "1131"
-	images := 13
+	folder := "1119"
+	images := 11
 	var opt fpdf.ImageOptions
 	opt.ReadDpi = true
-	opt.ImageType = "jpg"
+	opt.ImageType = "png"
 	pdf := fpdf.New("P", "mm", "A4", "")
 	for i := 0; i <= images; i++ {
 		imagePath := fmt.Sprintf("./%s/%d.%s", folder, i, opt.ImageType)
 		imageConfig := getSize(imagePath)
-		width, height := getSizeScaled(float64(imageConfig.Width), float64(imageConfig.Height))
+		width, height := getSizeScaled(float64(imageConfig.Width), float64(imageConfig.Height), pdf)
 		log.Printf("Width: %f Heigh: %f for image: %s\n", width, height, imagePath)
-		pdf.AddPage()
+
+		if width > height {
+			pdf.AddPageFormat("H", pdf.GetPageSizeStr("A4"))
+		} else {
+			pdf.AddPage()
+		}
 		pdf.ImageOptions(imagePath, 0, 0, width, height, false, opt, 0, "")
+
 	}
 	err := pdf.OutputFileAndClose("example.pdf")
 	if err != nil {
