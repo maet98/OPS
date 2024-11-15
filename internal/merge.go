@@ -5,9 +5,18 @@ import (
 	"image"
 	"log"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/go-pdf/fpdf"
 )
+
+func min(x, y float64) float64 {
+	if x < y {
+		return x
+	}
+	return y
+}
 
 func getSize(imgPath string) image.Config {
 	file, err := os.Open(imgPath)
@@ -20,13 +29,6 @@ func getSize(imgPath string) image.Config {
 	return img
 }
 
-func min(x, y float64) float64 {
-	if x < y {
-		return x
-	}
-	return y
-}
-
 func getSizeScaled(width, height float64, pdf *fpdf.Fpdf) (float64, float64) {
 	size := pdf.GetPageSizeStr("A4")
 
@@ -37,15 +39,31 @@ func getSizeScaled(width, height float64, pdf *fpdf.Fpdf) (float64, float64) {
 	return scale * width, scale * height
 }
 
-func Merge() {
-	folder := "1119"
-	images := 11
+func GetImages(folder string) []string {
+	var images []string
+	f, err := os.OpenFile("./episodes/"+folder, os.O_RDONLY, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	files, _ := f.Readdirnames(0)
+	slices.Sort(files)
+	log.Println(files)
+	return images
+}
+
+func getImageType(imageName string) string {
+	splits := strings.Split(imageName, ".")
+	return splits[len(splits)-1]
+}
+
+func Merge(folder string) {
+	images := GetImages(folder)
 	var opt fpdf.ImageOptions
 	opt.ReadDpi = true
-	opt.ImageType = "png"
 	pdf := fpdf.New("P", "mm", "A4", "")
-	for i := 0; i <= images; i++ {
-		imagePath := fmt.Sprintf("./%s/%d.%s", folder, i, opt.ImageType)
+	for _, imageName := range images {
+		opt.ImageType = getImageType(imageName)
+		imagePath := fmt.Sprintf("./episodes/%s%s", folder, imageName)
 		imageConfig := getSize(imagePath)
 		width, height := getSizeScaled(float64(imageConfig.Width), float64(imageConfig.Height), pdf)
 		log.Printf("Width: %f Heigh: %f for image: %s\n", width, height, imagePath)

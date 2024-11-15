@@ -64,7 +64,7 @@ func downloadImage(url string, episodeNumber string, i int, wg *sync.WaitGroup) 
 	filename := getFileName(url)
 	filetype := getFileType(filename)
 
-	file, err := os.Create(fmt.Sprintf("./%s/%d.%s", episodeNumber, i, filetype))
+	file, err := os.Create(fmt.Sprintf("./episodes/%s/%d.%s", episodeNumber, i, filetype))
 	if err != nil {
 		return
 	}
@@ -80,10 +80,10 @@ func downloadImage(url string, episodeNumber string, i int, wg *sync.WaitGroup) 
 
 func getEpisodeNumber(url string) string {
 	splits := strings.Split(url, "-")
-	return splits[len(splits)-1]
+	return strings.TrimSuffix(splits[len(splits)-1], "/")
 }
 
-func scrapEpisode(url string) {
+func scrapEpisode(url string) string {
 	c := colly.NewCollector()
 	// Instantiate default collector
 	episodeNumber := getEpisodeNumber(url)
@@ -107,10 +107,11 @@ func scrapEpisode(url string) {
 		fmt.Println("Visiting", r.URL.String())
 	})
 
-	os.Mkdir(episodeNumber, 0700)
+	os.Mkdir("./episodes/"+episodeNumber, 0700)
 	c.Visit(url)
 
 	wg.Wait()
+	return episodeNumber
 }
 
 func scrapHomePage(url string) []string {
@@ -136,7 +137,8 @@ func scrapHomePage(url string) []string {
 }
 
 func main() {
-	// url := "https://w44.1piecemanga.com/manga/one-piece-chapter-1131/"
-	// scrapEpisode(url)
-	internal.Merge()
+	url := "https://w44.1piecemanga.com"
+	episodes := scrapHomePage(url)
+	episodeNumber := scrapEpisode(episodes[1])
+	internal.Merge(episodeNumber)
 }
