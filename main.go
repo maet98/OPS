@@ -80,7 +80,12 @@ func downloadImage(url string, episodeNumber string, i int, wg *sync.WaitGroup) 
 
 func getEpisodeNumber(url string) string {
 	splits := strings.Split(url, "-")
-	return strings.TrimSuffix(splits[len(splits)-1], "/")
+	for i, value := range splits {
+		if value == "chapter" {
+			return strings.TrimSuffix(splits[i+1], "/")
+		}
+	}
+	return ""
 }
 
 func scrapEpisode(url string) string {
@@ -130,6 +135,10 @@ func scrapHomePage(url string) []string {
 	// Before making a request print "Visiting ..."
 	c.OnRequest(func(r *colly.Request) {
 		fmt.Println("Visiting", r.URL.String())
+	})
+	c.OnError(func(r *colly.Response, err error) {
+		fmt.Printf("Got status code: %d with body: %s\n", r.StatusCode, string(r.Body))
+		log.Println(err)
 	})
 
 	c.Visit(url)

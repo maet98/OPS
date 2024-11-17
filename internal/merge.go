@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-pdf/fpdf"
@@ -32,23 +33,33 @@ func getSize(imgPath string) image.Config {
 func getSizeScaled(width, height float64, pdf *fpdf.Fpdf) (float64, float64) {
 	size := pdf.GetPageSizeStr("A4")
 
-	log.Printf("Width: %f Heigh: %f \n", size.Wd, size.Ht)
 	widthScale := size.Wd / width
 	heightScale := size.Ht / height
 	scale := min(widthScale, heightScale)
 	return scale * width, scale * height
 }
 
-func GetImages(folder string) []string {
-	var images []string
+func getImages(folder string) []string {
 	f, err := os.OpenFile("./episodes/"+folder, os.O_RDONLY, 0666)
 	if err != nil {
 		log.Fatal(err)
 	}
 	files, _ := f.Readdirnames(0)
-	slices.Sort(files)
-	log.Println(files)
-	return images
+	slices.SortFunc(files, func(a, b string) int {
+		aRaw := strings.Split(a, ".")[0]
+		aNumber, err := strconv.Atoi(aRaw)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		bRaw := strings.Split(b, ".")[0]
+		bNumber, err := strconv.Atoi(bRaw)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return aNumber - bNumber
+	})
+	return files
 }
 
 func getImageType(imageName string) string {
@@ -57,16 +68,16 @@ func getImageType(imageName string) string {
 }
 
 func Merge(folder string) {
-	images := GetImages(folder)
+	images := getImages(folder)
 	var opt fpdf.ImageOptions
 	opt.ReadDpi = true
 	pdf := fpdf.New("P", "mm", "A4", "")
 	for _, imageName := range images {
 		opt.ImageType = getImageType(imageName)
-		imagePath := fmt.Sprintf("./episodes/%s%s", folder, imageName)
+		imagePath := fmt.Sprintf("./episodes/%s/%s", folder, imageName)
+
 		imageConfig := getSize(imagePath)
 		width, height := getSizeScaled(float64(imageConfig.Width), float64(imageConfig.Height), pdf)
-		log.Printf("Width: %f Heigh: %f for image: %s\n", width, height, imagePath)
 
 		if width > height {
 			pdf.AddPageFormat("H", pdf.GetPageSizeStr("A4"))
@@ -74,9 +85,10 @@ func Merge(folder string) {
 			pdf.AddPage()
 		}
 		pdf.ImageOptions(imagePath, 0, 0, width, height, false, opt, 0, "")
-
 	}
-	err := pdf.OutputFileAndClose("example.pdf")
+
+	chapterName := fmt.Sprintf("./episodes/chapter-%s.pdf", folder)
+	err := pdf.OutputFileAndClose(chapterName)
 	if err != nil {
 		log.Println("error: ", err)
 	}
