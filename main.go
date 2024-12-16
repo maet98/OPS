@@ -2,80 +2,54 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"log"
-	"maet98/scrapper/internal"
-	"net/http"
 	"os"
 	"strings"
-	"sync"
 
-	"github.com/gocolly/colly"
-	"github.com/unidoc/unipdf/v3/creator"
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-func getFileName(url string) string {
-	splits := strings.Split(url, "/")
-	return splits[len(splits)-1]
+var docStyle = lipgloss.NewStyle().Margin(1, 2)
+
+type LineItem struct {
+	title, desc string
 }
 
-func getFileType(filename string) string {
-	splits := strings.Split(filename, ".")
-	return splits[len(splits)-1]
+func (i LineItem) Title() string       { return i.title }
+func (i LineItem) Description() string { return i.desc }
+func (i LineItem) FilterValue() string { return i.title }
+
+type model struct {
+	list list.Model
 }
 
-func mergeToPdf(folder string) error {
-	c := creator.New()
-	dir := "./" + folder
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("Found %d files to merge\n", len(files))
+func (m model) Init() tea.Cmd {
+	return nil
+}
 
-	for _, file := range files {
-		imgPath := "./" + folder + "/" + file.Name()
-		img, err := c.NewImageFromFile(imgPath)
-		if err != nil {
-			log.Println("Found error when opening image", err)
-			return err
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
 		}
-		pageWidth := 612.0
-		img.ScaleToWidth(pageWidth)
-
-		pageHeight := pageWidth * img.Height() / img.Width()
-		c.SetPageSize(creator.PageSize{pageWidth, pageHeight})
-		c.NewPage()
-		img.SetPos(0, 0)
-		_ = c.Draw(img)
+		if msg.String() == "enter" {
+			value := m.list.Items()[m.list.Index()].FilterValue()
+			m.list.NewStatusMessage(fmt.Sprintf("Episode: %s selected", value))
+		}
+	case tea.WindowSizeMsg:
+		h, v := docStyle.GetFrameSize()
+		m.list.SetSize(msg.Width-h, msg.Height-v)
 	}
 
-	err = c.WriteToFile("./test")
-	return err
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
 }
 
-func downloadImage(url string, episodeNumber string, i int, wg *sync.WaitGroup) {
-	response, err := http.Get(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer response.Body.Close()
-
-	filename := getFileName(url)
-	filetype := getFileType(filename)
-
-	file, err := os.Create(fmt.Sprintf("./episodes/%s/%d.%s", episodeNumber, i, filetype))
-	if err != nil {
-		return
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, response.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Imaged downloaded succesfully")
-	wg.Done()
+func (m model) View() string {
+	return docStyle.Render(m.list.View())
 }
 
 func getEpisodeNumber(url string) string {
@@ -88,66 +62,35 @@ func getEpisodeNumber(url string) string {
 	return ""
 }
 
-func scrapEpisode(url string) string {
-	c := colly.NewCollector()
-	// Instantiate default collector
-	episodeNumber := getEpisodeNumber(url)
-	log.Println("Episode number:", episodeNumber)
-
-	var wg sync.WaitGroup
-
-	i := 0
-	// On every a element which has href attribute call callback
-	c.OnHTML("img", func(e *colly.HTMLElement) {
-		src := e.Attr("src")
-		// Print link
-		wg.Add(1)
-		fmt.Printf("Source found: %s\n", src)
-		go downloadImage(src, episodeNumber, i, &wg)
-		i++
-	})
-
-	// Before making a request print "Visiting ..."
-	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", r.URL.String())
-	})
-
-	os.Mkdir("./episodes/"+episodeNumber, 0700)
-	c.Visit(url)
-
-	wg.Wait()
-	return episodeNumber
-}
-
-func scrapHomePage(url string) []string {
+func getHomePage() []string {
 	var answer []string
-	c := colly.NewCollector()
-
-	// On every a element which has href attribute call callback
-	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
-		url := e.Attr("href")
-		if strings.Contains(url, "chapter") {
-			log.Printf("Found new episode %s -> %s", e.Text, url)
-			answer = append(answer, url)
-		}
-	})
-
-	// Before making a request print "Visiting ..."
-	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", r.URL.String())
-	})
-	c.OnError(func(r *colly.Response, err error) {
-		fmt.Printf("Got status code: %d with body: %s\n", r.StatusCode, string(r.Body))
-		log.Println(err)
-	})
-
-	c.Visit(url)
+	for i := 1; i < 200; i++ {
+		episodeNumber := fmt.Sprintf("chapter-%d", i)
+		answer = append(answer, episodeNumber)
+	}
 	return answer
 }
 
 func main() {
-	url := "https://w44.1piecemanga.com"
-	episodes := scrapHomePage(url)
-	episodeNumber := scrapEpisode(episodes[1])
-	internal.Merge(episodeNumber)
+	// url := "https://w44.1piecemanga.com"
+	episodes := getHomePage()
+	var items []list.Item
+	for _, episode := range episodes {
+		episodeNumber := getEpisodeNumber(episode)
+		item := LineItem{
+			title: episodeNumber,
+			desc:  fmt.Sprintf("chapter episode %s", episodeNumber),
+		}
+		items = append(items, item)
+	}
+
+	m := model{list: list.New(items, list.NewDefaultDelegate(), 0, 0)}
+	m.list.Title = "One piece episode"
+
+	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	if _, err := p.Run(); err != nil {
+		fmt.Println("Error running program:", err)
+		os.Exit(1)
+	}
 }
