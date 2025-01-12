@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"maet98/scrapper/internal/scrap"
 	"os"
 	"strings"
 
@@ -11,7 +13,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type errMsg error
+
 var docStyle = lipgloss.NewStyle().Margin(1, 2)
+var selected []string
 
 type LineItem struct {
 	title, desc string
@@ -27,24 +32,42 @@ const (
 	FETCHING state = iota
 	CHOOSE
 	CONFIRM
+	DOWNLOADED
 )
 
 type model struct {
 	list     list.Model
 	spinner  spinner.Model
 	quitting bool
+	err      error
 	state    state
 }
 
 func (m model) Init() tea.Cmd {
-	go m.fetchEpisodes()
 	return m.spinner.Tick
 }
 
-type found tea.Msg
+type EpisodeFound struct {
+	list list.Model
+}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.state == FETCHING {
+	var cmd tea.Cmd
+
+	if s, ok := msg.(string); ok {
+		if s == "FETCHED" {
+			m.state = DOWNLOADED
+			return m, nil
+		}
+	}
+
+	switch m.state {
+	case DOWNLOADED:
+		switch msg.(type) {
+		case tea.KeyMsg:
+			return m, tea.Quit
+		}
+	case FETCHING:
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.String() {
@@ -54,56 +77,65 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				return m, nil
 			}
-		case found:
-			var cmd tea.Cmd
+		case errMsg:
+			m.err = msg
+			return m, nil
+		case EpisodeFound:
 			m.state = CHOOSE
-			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
-
+			m.list = msg.list
+			return m, nil
 		default:
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
 		}
-	}
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
-		}
-		if msg.String() == "enter" {
-			value := m.list.Items()[m.list.Index()].FilterValue()
-			m.list.NewStatusMessage(fmt.Sprintf("Episode: %s selected", value))
-		}
-		if msg.String() == "c" {
-			if m.state == CHOOSE {
-				m.state = CONFIRM
+	case CHOOSE:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.String() == "c" {
+				if m.state == CHOOSE {
+					cmd := tea.Batch(download, m.spinner.Tick)
+					m.state = CONFIRM
+					return m, cmd
+				}
 			}
+			if msg.String() == "enter" {
+				value := m.list.Items()[m.list.Index()].FilterValue()
+				m.list.NewStatusMessage(fmt.Sprintf("Episode: %s selected", value))
+				selected = append(selected, value)
+			}
+			m.list, cmd = m.list.Update(msg)
+			return m, cmd
+		case tea.WindowSizeMsg:
+			h, v := docStyle.GetFrameSize()
+			m.list.SetSize(msg.Width-h, msg.Height-v)
 		}
-	case tea.WindowSizeMsg:
-		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
-	}
-
-	if m.state == CHOOSE {
-		var cmd tea.Cmd
-		m.list, cmd = m.list.Update(msg)
+	case CONFIRM:
+		spinner, cmd := m.spinner.Update(msg)
+		m.spinner = spinner
 		return m, cmd
 	}
 
-	var cmd tea.Cmd
-	m.spinner, cmd = m.spinner.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
 func (m model) View() string {
+	if m.state == DOWNLOADED {
+		return "Episode have been downloaded\n\n. Press any key to leave."
+	}
 	if m.state == CHOOSE {
 		return docStyle.Render(m.list.View())
-	} else {
-		str := fmt.Sprintf("\n\n   %s Loading forever...press q to quit\n\n", m.spinner.View(), m.state)
-		return str
 	}
+
+	if m.err != nil {
+		return m.err.Error()
+	}
+
+	str := fmt.Sprintf("\n\n   %s...press q to quit\n\n", m.spinner.View())
+	if m.quitting {
+		return str + "\n"
+	}
+	return str
 }
 
 func getEpisodeNumber(url string) string {
@@ -125,7 +157,7 @@ func getHomePage() []string {
 	return answer
 }
 
-func (model *model) fetchEpisodes() {
+func fetchEpisodes() EpisodeFound {
 	episodes := getHomePage()
 
 	var items []list.Item
@@ -137,10 +169,29 @@ func (model *model) fetchEpisodes() {
 		}
 		items = append(items, item)
 	}
+	log.Println(episodes)
 
-	model.list = list.New(items, list.NewDefaultDelegate(), 0, 0)
-	found := true
-	model.Update(found)
+	list := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	list.Title = "One piece episode"
+
+	msg := EpisodeFound{list: list}
+
+	return msg
+}
+
+func toEpisodeUrl(episode string) string {
+	return "https://w44.1piecemanga.com/manga/one-piece-chapter-" + episode
+}
+
+func download() tea.Msg {
+	log.Println("Initialize Download")
+	log.Println(selected)
+	for _, episode := range selected {
+		log.Println(toEpisodeUrl(episode))
+		episodeNumber := scrap.GetEpisode(toEpisodeUrl(episode))
+		log.Println("episode number finished ", episodeNumber)
+	}
+	return "FETCHED"
 }
 
 func getInitialModel() model {
@@ -149,15 +200,22 @@ func getInitialModel() model {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
-	m := model{spinner: s, state: FETCHING}
-	m.list.Title = "One piece episode"
+	episodes := fetchEpisodes()
+
+	m := model{spinner: s, list: episodes.list, state: CHOOSE}
 
 	return m
 }
 
 func main() {
-	m := getInitialModel()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	f, err := tea.LogToFile("debug.log", "debug")
+	if err != nil {
+		fmt.Println("fatal:", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+	model := getInitialModel()
+	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Println("Error running program:", err)
