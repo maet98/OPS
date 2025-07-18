@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"maet98/scrapper/internal/merge"
 	"maet98/scrapper/internal/scrap"
 	"os"
 	"strings"
@@ -21,6 +22,8 @@ var selected []string
 type LineItem struct {
 	title, desc string
 }
+
+const URL = "https://w37.onepiece-manga-online.net/"
 
 func (i LineItem) Title() string       { return i.title }
 func (i LineItem) Description() string { return i.desc }
@@ -158,7 +161,7 @@ func getHomePage() []string {
 }
 
 func fetchEpisodes() EpisodeFound {
-	episodes := getHomePage()
+	episodes := scrap.GetHomePage(URL)
 
 	var items []list.Item
 	for _, episode := range episodes {
@@ -169,7 +172,6 @@ func fetchEpisodes() EpisodeFound {
 		}
 		items = append(items, item)
 	}
-	log.Println(episodes)
 
 	list := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	list.Title = "One piece episode"
@@ -179,23 +181,23 @@ func fetchEpisodes() EpisodeFound {
 	return msg
 }
 
-func toEpisodeUrl(episode string) string {
-	return "https://w44.1piecemanga.com/manga/one-piece-chapter-" + episode
+func toEpisodeUrl(url, episode string) string {
+	return url + "manga/one-piece-chapter-" + episode
 }
 
 func download() tea.Msg {
 	log.Println("Initialize Download")
-	log.Println(selected)
 	for _, episode := range selected {
-		log.Println(toEpisodeUrl(episode))
-		episodeNumber := scrap.GetEpisode(toEpisodeUrl(episode))
+		log.Println(toEpisodeUrl(URL, episode))
+		episodeNumber := scrap.GetEpisode(toEpisodeUrl(URL, episode))
 		log.Println("episode number finished ", episodeNumber)
+		merge.MergeToPdf(episodeNumber)
+		log.Println("episode number merged to pdf ", episodeNumber)
 	}
 	return "FETCHED"
 }
 
 func getInitialModel() model {
-	// url := "https://w44.1piecemanga.com"
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))

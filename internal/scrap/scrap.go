@@ -34,26 +34,21 @@ func getEpisodeNumber(url string) string {
 
 func GetEpisode(url string) string {
 	c := colly.NewCollector()
-	// Instantiate default collector
 	episodeNumber := getEpisodeNumber(url)
 	log.Println("Episode number:", episodeNumber)
 
 	var wg sync.WaitGroup
 
 	i := 0
-	// On every a element which has href attribute call callback
 	c.OnHTML("img", func(e *colly.HTMLElement) {
-		src := e.Attr("src")
-		// Print link
+		imageUrl := e.Attr("src")
 		wg.Add(1)
-		fmt.Printf("Source found: %s\n", src)
-		go DownloadImage(src, episodeNumber, i, &wg)
+		log.Printf("Source found: %s\n", imageUrl)
+		go func() {
+			DownloadImage(imageUrl, episodeNumber, i)
+			wg.Done()
+		}()
 		i++
-	})
-
-	// Before making a request print "Visiting ..."
-	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", r.URL.String())
 	})
 
 	os.Mkdir("./episodes/"+episodeNumber, 0700)
@@ -64,39 +59,49 @@ func GetEpisode(url string) string {
 }
 
 func GetHomePage(url string) []string {
-	var answer []string
+	var chapters []string
 	c := colly.NewCollector()
 
-	// On every a element which has href attribute call callback
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		url := e.Attr("href")
 		if strings.Contains(url, "chapter") {
-			log.Printf("Found new episode %s -> %s", e.Text, url)
-			answer = append(answer, url)
+			chapters = append(chapters, url)
 		}
 	})
 
-	// Before making a request print "Visiting ..."
 	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting", r.URL.String())
+		log.Println("Visiting", r.URL.String())
 	})
 
 	c.Visit(url)
-	return answer
+	removedIncomingChapters := chapters[4:]
+	return removedIncomingChapters
 }
 
-func DownloadImage(url string, episodeNumber string, i int, wg *sync.WaitGroup) {
+func DownloadImage(url string, episodeNumber string, i int) {
+	httpsPrefix := "https:"
+	if !strings.HasPrefix(url, httpsPrefix) {
+		url = httpsPrefix + url
+	}
 	response, err := http.Get(url)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Error while downloading image", err)
+		return
 	}
+	if response.StatusCode != 200 {
+		log.Printf("Couldn't fetch image. Status code: %d\n", response.StatusCode)
+		return
+	}
+
 	defer response.Body.Close()
 
 	filename := getFileName(url)
 	filetype := getFileType(filename)
 
-	file, err := os.Create(fmt.Sprintf("./episodes/%s/%d.%s", episodeNumber, i, filetype))
+	filePath := fmt.Sprintf("./episodes/%s/%d.%s", episodeNumber, i, filetype)
+	file, err := os.Create(filePath)
 	if err != nil {
+		log.Println("Couldn't create file :", filePath)
 		return
 	}
 	defer file.Close()
@@ -105,6 +110,6 @@ func DownloadImage(url string, episodeNumber string, i int, wg *sync.WaitGroup) 
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Imaged downloaded succesfully")
-	wg.Done()
+
+	log.Printf("Image %s downloaded succesfully\n", url)
 }
