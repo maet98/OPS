@@ -5,6 +5,7 @@ import (
 	"image"
 	"log"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,13 +19,21 @@ func MergeToPdf(episodeNumber string) {
 	opt.ReadDpi = true
 	pdf := fpdf.New("P", "mm", "A4", "")
 	for _, imageName := range images {
-		imageType := getImageType(imageName)
-		if !isSupported(imageType) {
+		imagePath := fmt.Sprintf("./episodes/hunter/%s/%s", episodeNumber, imageName)
+		file, err := os.Open(imagePath)
+		if err != nil {
+			log.Printf("Skipping unreadable file %s: %v\n", imageName, err)
 			continue
 		}
 
-		opt.ImageType = imageType
-		imagePath := fmt.Sprintf("./episodes/%s/%s", episodeNumber, imageName)
+		// 2. Safely decode just the config/header to get the real format
+		_, format, err := image.DecodeConfig(file)
+		file.Close() // Close immediately after reading config
+		if err != nil {
+			log.Printf("Skipping corrupted or unreadable image %s: %v\n", imageName, err)
+			continue
+		}
+		opt.ImageType = format
 
 		imageConfig := getSize(imagePath)
 		width, height := getSizeScaled(float64(imageConfig.Width), float64(imageConfig.Height), pdf)
@@ -37,10 +46,10 @@ func MergeToPdf(episodeNumber string) {
 		pdf.ImageOptions(imagePath, 0, 0, width, height, false, opt, 0, "")
 	}
 
-	chapterName := fmt.Sprintf("./episodes/chapter-%s.pdf", episodeNumber)
+	chapterName := fmt.Sprintf("./episodes/hunter/chapter-%s.pdf", episodeNumber)
 	err := pdf.OutputFileAndClose(chapterName)
 	if err != nil {
-		log.Println("error: ", err)
+		log.Println("When merging error: ", err)
 	}
 }
 
@@ -78,13 +87,33 @@ func getSizeScaled(width, height float64, pdf *fpdf.Fpdf) (float64, float64) {
 	return scale * width, scale * height
 }
 
+var imageRegex = regexp.MustCompile(`(?i)\.(jpe?g|png|gif|webp|avif|bmp|tiff?|svg|heic)$`)
+
+func isValidImage(filename string) bool {
+	return imageRegex.MatchString(filename)
+}
+
+func getExtension(filename string) string {
+	splits := strings.Split(filename, ".")
+
+	return splits[len(splits)-1]
+}
+
 func getImages(episodeNumber string) []string {
-	f, err := os.OpenFile("./episodes/"+episodeNumber, os.O_RDONLY, 0666)
+	f, err := os.OpenFile("./episodes/hunter/"+episodeNumber, os.O_RDONLY, 0666)
 	if err != nil {
 		log.Fatal(err)
 	}
 	files, _ := f.Readdirnames(0)
-	slices.SortFunc(files, func(a, b string) int {
+	var imageFiles []string
+
+	for _, image := range imageFiles {
+		if isValidImage(image) {
+			imageFiles = append(imageFiles, image)
+		}
+	}
+
+	slices.SortFunc(imageFiles, func(a, b string) int {
 		aRaw := strings.Split(a, ".")[0]
 		aNumber, err := strconv.Atoi(aRaw)
 		if err != nil {

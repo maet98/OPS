@@ -1,11 +1,14 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
+	"maet98/scrapper/internal/config"
 	"maet98/scrapper/internal/merge"
 	"maet98/scrapper/internal/scrap"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -23,11 +26,9 @@ type LineItem struct {
 	title, desc string
 }
 
-const URL = "https://w37.onepiece-manga-online.net/"
-
 func (i LineItem) Title() string       { return i.title }
 func (i LineItem) Description() string { return i.desc }
-func (i LineItem) FilterValue() string { return i.title }
+func (i LineItem) FilterValue() string { return i.desc }
 
 type state int
 
@@ -39,11 +40,13 @@ const (
 )
 
 type model struct {
-	list     list.Model
-	spinner  spinner.Model
-	quitting bool
-	err      error
-	state    state
+	list         list.Model
+	spinner      spinner.Model
+	quitting     bool
+	err          error
+	state        state
+	windowWidth  int
+	windowHeight int
 }
 
 func (m model) Init() tea.Cmd {
@@ -62,6 +65,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = DOWNLOADED
 			return m, nil
 		}
+	}
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.windowWidth, m.windowHeight = msg.Width, msg.Height
 	}
 
 	switch m.state {
@@ -97,7 +104,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			if msg.String() == "c" {
 				if m.state == CHOOSE {
-					cmd := tea.Batch(download, m.spinner.Tick)
 					m.state = CONFIRM
 					return m, cmd
 				}
@@ -120,6 +126,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m model) renderDetailView() string {
+	// Use Lip Gloss to style your detail page
+	header := lipgloss.NewStyle().Bold(true).Render("hola:")
+	footer := "\n\n(press 'esc' to go back)"
+
+	// Center the view on the screen
+	content := lipgloss.JoinVertical(lipgloss.Left, header, "", footer)
+	return lipgloss.Place(m.windowWidth, m.windowHeight, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (m model) View() string {
@@ -161,14 +177,15 @@ func getHomePage() []string {
 }
 
 func fetchEpisodes() EpisodeFound {
-	episodes := scrap.GetHomePage(URL)
+	url := config.GetConfig().BaseUrl
+	episodes := scrap.GetHomePage(url)
 
 	var items []list.Item
 	for _, episode := range episodes {
 		episodeNumber := getEpisodeNumber(episode)
 		item := LineItem{
 			title: episodeNumber,
-			desc:  fmt.Sprintf("chapter episode %s", episodeNumber),
+			desc:  episode,
 		}
 		items = append(items, item)
 	}
@@ -181,15 +198,11 @@ func fetchEpisodes() EpisodeFound {
 	return msg
 }
 
-func toEpisodeUrl(url, episode string) string {
-	return url + "manga/one-piece-chapter-" + episode
-}
-
 func download() tea.Msg {
 	log.Println("Initialize Download")
 	for _, episode := range selected {
-		log.Println(toEpisodeUrl(URL, episode))
-		episodeNumber := scrap.GetEpisode(toEpisodeUrl(URL, episode))
+		log.Println(episode)
+		episodeNumber := scrap.GetEpisode(episode)
 		log.Println("episode number finished ", episodeNumber)
 		merge.MergeToPdf(episodeNumber)
 		log.Println("episode number merged to pdf ", episodeNumber)
@@ -209,7 +222,7 @@ func getInitialModel() model {
 	return m
 }
 
-func main() {
+func start_tui() {
 	f, err := tea.LogToFile("debug.log", "debug")
 	if err != nil {
 		fmt.Println("fatal:", err)
@@ -223,4 +236,55 @@ func main() {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
+
+}
+
+func getChapterUrl(chapterNumber int, episodes []string) string {
+	chapter := strconv.Itoa(chapterNumber)
+	for _, value := range episodes {
+		if strings.Contains(value, chapter) {
+			return value
+		}
+	}
+	return ""
+}
+
+func rangeDownload(from, to int) {
+	for from <= to {
+		singleDownload(from)
+		from++
+	}
+}
+
+func singleDownload(chapter int) {
+	url := config.GetConfig().BaseUrl
+	episodes := scrap.GetHomePage(url)
+
+	episodeUrl := getChapterUrl(chapter, episodes)
+	episodeNumber := scrap.GetEpisode(episodeUrl)
+	merge.MergeToPdf(episodeNumber)
+	fmt.Println("The episode was downloaded")
+}
+
+func main() {
+	chapter := flag.Int("chapter", -1, "Number of the chapter to download")
+	from := flag.Int("from", -1, "Range of chapter to download")
+	to := flag.Int("to", -1, "Range of chapter to download")
+	flag.Parse()
+
+	if *chapter == -1 && *from == -1 && *to == -1 {
+		fmt.Print("You have to provide a chapter")
+		return
+	}
+
+	if *chapter != -1 {
+		singleDownload(*chapter)
+	}
+
+	if *from != -1 && *to != -1 {
+		rangeDownload(*from, *to)
+	}
+
+	fmt.Println("You must provide a valid param.")
+
 }
